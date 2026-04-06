@@ -49,6 +49,13 @@ jobs:
         run: |
           printf '%s\n' '${{ secrets.OCI_SSH_PUBLIC_KEY }}' > /tmp/ssh_key.pub
 
+      - name: Debug SSH Key
+        run: |
+          echo "SSH key file contents:"
+          cat /tmp/ssh_key.pub | head -c 50
+          echo "..."
+          echo "File size: $(wc -c < /tmp/ssh_key.pub) bytes"
+
       - name: Try Create Instance
         id: create
         run: |
@@ -61,6 +68,7 @@ jobs:
             --subnet-id "${{ secrets.OCI_SUBNET_OCID }}" \
             --ssh-authorized-keys-file /tmp/ssh_key.pub \
             --display-name "shopai-server" \
+            --debug \
             2>&1 | tee result.txt || true
 
           if grep -q "ocid1.instance" result.txt; then
@@ -68,7 +76,7 @@ jobs:
           else
             echo "success=false" >> $GITHUB_OUTPUT
             echo "--- Result ---"
-            cat result.txt
+            tail -30 result.txt
           fi
 
       - name: Notify Success
