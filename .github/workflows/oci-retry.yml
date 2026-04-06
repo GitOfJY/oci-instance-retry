@@ -1,10 +1,8 @@
 name: OCI ARM Instance Retry
-
 on:
   schedule:
     - cron: '0 18,19,20,21 * * *'
   workflow_dispatch:
-
 jobs:
   create-instance:
     runs-on: ubuntu-latest
@@ -14,7 +12,6 @@ jobs:
     steps:
       - name: Install OCI CLI
         run: pip install oci-cli
-
       - name: Configure OCI CLI
         run: |
           mkdir -p ~/.oci
@@ -29,7 +26,6 @@ jobs:
           key_file=/home/runner/.oci/oci_api_key.pem
           EOF
           chmod 600 ~/.oci/config
-
       - name: Get Image OCID
         id: image
         run: |
@@ -44,27 +40,24 @@ jobs:
             --query 'data[0].id' \
             --raw-output)
           echo "id=$IMAGE_ID" >> $GITHUB_OUTPUT
-
       - name: Write SSH Public Key
         run: |
           echo "${{ secrets.OCI_SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub
-
       - name: Try Create Instance
         id: create
         run: |
           SSH_KEY=$(cat /tmp/ssh_key.pub)
-          
           oci compute instance launch \
             --availability-domain "QIZn:AP-CHUNCHEON-1-AD-1" \
             --compartment-id "${{ secrets.OCI_TENANCY_OCID }}" \
             --shape "VM.Standard.A1.Flex" \
             --shape-config '{"ocpus":4,"memoryInGbs":24}' \
             --image-id "${{ steps.image.outputs.id }}" \
-            --create-vnic-details '{"subnetId":"${{ secrets.OCI_SUBNET_OCID }}","assignPublicIp":true}' \
+            --subnet-id "${{ secrets.OCI_SUBNET_OCID }}" \
+            --assign-public-ip true \
             --metadata "{\"ssh_authorized_keys\":\"$SSH_KEY\"}" \
             --display-name "shopai-server" \
             2>&1 | tee result.txt || true
-
           if grep -q "ocid1.instance" result.txt; then
             echo "success=true" >> $GITHUB_OUTPUT
           else
@@ -72,7 +65,6 @@ jobs:
             echo "--- Result ---"
             cat result.txt
           fi
-
       - name: Notify Success
         if: steps.create.outputs.success == 'true'
         run: echo "Instance created! Check OCI console for public IP."
