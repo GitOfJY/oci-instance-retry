@@ -2,30 +2,52 @@ name: OCI ARM Instance Retry
 
 on:
   schedule:
-    - cron: '0 18,19,20,21 * * *'  # 매일 새벽 3,4,5,6시(KST) 자동 실행
-  workflow_dispatch:  # 수동 실행도 가능
+    - cron: '0 18,19,20,21 * * *'
+  workflow_dispatch:
 
 jobs:
   create-instance:
     runs-on: ubuntu-latest
+    env:
+      OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING: "True"
+      SUPPRESS_LABEL_WARNING: "True"
     steps:
       - name: Install OCI CLI
-        run: |
-          pip install oci-cli
+        run: pip install oci-cli
 
       - name: Configure OCI CLI
         run: |
           mkdir -p ~/.oci
           echo "${{ secrets.OCI_PRIVATE_KEY }}" > ~/.oci/oci_api_key.pem
           chmod 600 ~/.oci/oci_api_key.pem
-          cat > ~/.oci/config << EOF
+          cat > ~/.oci/config << 'EOF'
           [DEFAULT]
           user=${{ secrets.OCI_USER_OCID }}
           fingerprint=${{ secrets.OCI_FINGERPRINT }}
           tenancy=${{ secrets.OCI_TENANCY_OCID }}
           region=ap-chuncheon-1
-          key_file=~/.oci/oci_api_key.pem
+          key_file=/home/runner/.oci/oci_api_key.pem
           EOF
+          chmod 600 ~/.oci/config
+
+      - name: Get Image OCID
+        id: image
+        run: |
+          IMAGE_ID=$(oci compute image list \
+            --compartment-id "${{ secrets.OCI_TENANCY_OCID }}" \
+            --operating-system "Canonical Ubuntu" \
+            --operating-system-version "22.04" \
+            --shape "VM.Standard.A1.Flex" \
+            --sort-by TIMECREATED \
+            --sort-order DESC \
+            --limit 1 \
+            --query 'data[0].id' \
+            --raw-output)
+          echo "id=$IMAGE_ID" >> $GITHUB_OUTPUT
+
+      - name: Write SSH Public Key
+        run: |
+          echo "${{ secrets.OCI_SSH_PUBLIC_KEY }}" > /tmp/ssh_key.pub
 
       - name: Try Create Instance
         id: create
@@ -36,21 +58,20 @@ jobs:
             --shape "VM.Standard.A1.Flex" \
             --shape-config '{"ocpus":4,"memoryInGbs":24}' \
             --subnet-id "${{ secrets.OCI_SUBNET_OCID }}" \
-            --image-id "$(oci compute image list --compartment-id ${{ secrets.OCI_TENANCY_OCID }} --operating-system "Canonical Ubuntu" --operating-system-version "22.04" --shape "VM.Standard.A1.Flex" --sort-by TIMECREATED --sort-order DESC --limit 1 --query 'data[0].id' --raw-output)" \
+            --image-id "${{ steps.image.outputs.id }}" \
             --assign-public-ip true \
-            --ssh-authorized-keys-file <(echo "${{ secrets.OCI_SSH_PUBLIC_KEY }}") \
+            --ssh-authorized-keys-file /tmp/ssh_key.pub \
             --display-name "shopai-server" \
-            2>&1 | tee result.txt
+            2>&1 | tee result.txt || true
 
           if grep -q "ocid1.instance" result.txt; then
             echo "success=true" >> $GITHUB_OUTPUT
           else
             echo "success=false" >> $GITHUB_OUTPUT
+            echo "--- Result ---"
             cat result.txt
           fi
 
       - name: Notify Success
         if: steps.create.outputs.success == 'true'
-        run: |
-          echo "🎉 Instance created successfully!"
-          echo "Check OCI console for public IP"
+        run: echo "Instance created! Check OCI console for public IP."
