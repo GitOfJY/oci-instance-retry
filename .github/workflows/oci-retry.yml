@@ -29,5 +29,49 @@ jobs:
       - name: Get Image OCID
         id: image
         run: |
-          IMAGE_ID=$(oci compute image list \
-            --compartment-id "${{ secrets.OCI_TENANCY_OCID }}" \
+          IMAGE_ID=$(oci compute image list --compartment-id "${{ secrets.OCI_TENANCY_OCID }}" --operating-system "Canonical Ubuntu" --operating-system-version "22.04" --shape "VM.Standard.A1.Flex" --sort-by TIMECREATED --sort-order DESC --limit 1 --query 'data[0].id' --raw-output)
+          echo "id=$IMAGE_ID" >> $GITHUB_OUTPUT
+
+      - name: Build Launch JSON
+        run: |
+          SSH_KEY="$(echo -n '${{ secrets.OCI_SSH_PUBLIC_KEY }}' | tr -d '\n\r')"
+          python3 -c "
+          import json
+          data = {
+            'availabilityDomain': 'QIZn:AP-CHUNCHEON-1-AD-1',
+            'compartmentId': '${{ secrets.OCI_TENANCY_OCID }}',
+            'displayName': 'shopai-server',
+            'shape': 'VM.Standard.A1.Flex',
+            'shapeConfig': {'ocpus': 4.0, 'memoryInGbs': 24.0},
+            'sourceDetails': {
+              'sourceType': 'image',
+              'imageId': '${{ steps.image.outputs.id }}'
+            },
+            'createVnicDetails': {
+              'subnetId': '${{ secrets.OCI_SUBNET_OCID }}',
+              'assignPublicIp': True
+            },
+            'metadata': {
+              'ssh_authorized_keys': '''${SSH_KEY}'''
+            }
+          }
+          with open('/tmp/launch.json', 'w') as f:
+            json.dump(data, f, indent=2)
+          print(json.dumps(data, indent=2))
+          "
+
+      - name: Try Create Instance
+        id: create
+        run: |
+          oci compute instance launch --from-json "file:///tmp/launch.json" 2>&1 | tee result.txt || true
+          if grep -q "ocid1.instance" result.txt; then
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "success=false" >> $GITHUB_OUTPUT
+            echo "--- Result ---"
+            tail -5 result.txt
+          fi
+
+      - name: Notify Success
+        if: steps.create.outputs.success == 'true'
+        run: echo "Instance created! Check OCI console for public IP."
