@@ -20,14 +20,10 @@ jobs:
           mkdir -p ~/.oci
           echo "${{ secrets.OCI_PRIVATE_KEY }}" > ~/.oci/oci_api_key.pem
           chmod 600 ~/.oci/oci_api_key.pem
-          cat > ~/.oci/config << EOF
-          [DEFAULT]
-          user=${{ secrets.OCI_USER_OCID }}
-          fingerprint=${{ secrets.OCI_FINGERPRINT }}
-          tenancy=${{ secrets.OCI_TENANCY_OCID }}
-          region=ap-chuncheon-1
-          key_file=/home/runner/.oci/oci_api_key.pem
-          EOF
+          printf '[DEFAULT]\nuser=%s\nfingerprint=%s\ntenancy=%s\nregion=ap-chuncheon-1\nkey_file=/home/runner/.oci/oci_api_key.pem\n' \
+            "${{ secrets.OCI_USER_OCID }}" \
+            "${{ secrets.OCI_FINGERPRINT }}" \
+            "${{ secrets.OCI_TENANCY_OCID }}" > ~/.oci/config
           chmod 600 ~/.oci/config
 
       - name: Get Image OCID
@@ -35,50 +31,3 @@ jobs:
         run: |
           IMAGE_ID=$(oci compute image list \
             --compartment-id "${{ secrets.OCI_TENANCY_OCID }}" \
-            --operating-system "Canonical Ubuntu" \
-            --operating-system-version "22.04" \
-            --shape "VM.Standard.A1.Flex" \
-            --sort-by TIMECREATED \
-            --sort-order DESC \
-            --limit 1 \
-            --query 'data[0].id' \
-            --raw-output)
-          echo "id=$IMAGE_ID" >> $GITHUB_OUTPUT
-
-      - name: Prepare SSH Key
-        run: |
-          echo -n '${{ secrets.OCI_SSH_PUBLIC_KEY }}' | tr -d '\n\r' > /tmp/ssh_key.pub
-
-      - name: Debug SSH Key
-        run: |
-          echo "SSH key file contents:"
-          cat /tmp/ssh_key.pub | head -c 50
-          echo "..."
-          echo "File size: $(wc -c < /tmp/ssh_key.pub) bytes"
-
-      - name: Try Create Instance
-        id: create
-        run: |
-          oci compute instance launch \
-            --availability-domain "QIZn:AP-CHUNCHEON-1-AD-1" \
-            --compartment-id "${{ secrets.OCI_TENANCY_OCID }}" \
-            --shape "VM.Standard.A1.Flex" \
-            --shape-config '{"ocpus":4.0,"memoryInGbs":24.0}' \
-            --image-id "${{ steps.image.outputs.id }}" \
-            --subnet-id "${{ secrets.OCI_SUBNET_OCID }}" \
-            --ssh-authorized-keys-file /tmp/ssh_key.pub \
-            --display-name "shopai-server" \
-            --debug \
-            2>&1 | tee result.txt || true
-
-          if grep -q "ocid1.instance" result.txt; then
-            echo "success=true" >> $GITHUB_OUTPUT
-          else
-            echo "success=false" >> $GITHUB_OUTPUT
-            echo "--- Result ---"
-            tail -30 result.txt
-          fi
-
-      - name: Notify Success
-        if: steps.create.outputs.success == 'true'
-        run: echo "Instance created! Check OCI console for public IP."
