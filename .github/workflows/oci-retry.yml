@@ -52,15 +52,16 @@ jobs:
       - name: Try Create Instance
         id: create
         run: |
+          SSH_KEY=$(cat /tmp/ssh_key.pub)
+          
           oci compute instance launch \
             --availability-domain "QIZn:AP-CHUNCHEON-1-AD-1" \
             --compartment-id "${{ secrets.OCI_TENANCY_OCID }}" \
             --shape "VM.Standard.A1.Flex" \
             --shape-config '{"ocpus":4,"memoryInGbs":24}' \
-            --subnet-id "${{ secrets.OCI_SUBNET_OCID }}" \
             --image-id "${{ steps.image.outputs.id }}" \
-            --assign-public-ip true \
-            --ssh-authorized-keys-file /tmp/ssh_key.pub \
+            --create-vnic-details '{"subnetId":"${{ secrets.OCI_SUBNET_OCID }}","assignPublicIp":true}' \
+            --metadata "{\"ssh_authorized_keys\":\"$SSH_KEY\"}" \
             --display-name "shopai-server" \
             2>&1 | tee result.txt || true
 
