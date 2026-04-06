@@ -47,7 +47,7 @@ jobs:
 
       - name: Prepare SSH Key
         run: |
-          printf '%s\n' '${{ secrets.OCI_SSH_PUBLIC_KEY }}' > /tmp/ssh_key.pub
+          echo -n '${{ secrets.OCI_SSH_PUBLIC_KEY }}' | tr -d '\n\r' > /tmp/ssh_key.pub
 
       - name: Debug SSH Key
         run: |
